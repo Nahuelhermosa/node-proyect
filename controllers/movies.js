@@ -1,30 +1,40 @@
-import crypto from "node:crypto"; // Importa crypto, si es necesario
-import dataSource from "../services/datasource.js"; // Asegúrate de que datasource.js esté convertido a ES Modules
+import { Movie } from "../model/mongoDB/movie.js"; // Ruta corregida
+import dataSource from "../services/datasource.js";  // Asegúrate de importar dataSource si es necesario
 
 const movieController = {
-  movies: null,
-
   async getAll(req, res) {
-    this.movies = await dataSource.load();
-    res.render("movies", { movies: this.movies });
+    try {
+      const movies = await Movie.find();
+      res.render("movies", { movies });
+    } catch (error) {
+      res.status(500).send("Error al obtener las películas");
+    }
   },
 
   async getById(req, res) {
-    this.movies = await dataSource.load();
-    const { id } = req.params;
-    const movie = this.movies.find((movie) => movie.id === id);
-    res.render("movieDetail", { movie });
+    try {
+      const { id } = req.params;
+      const movie = await Movie.findById(id);
+      if (!movie) {
+        return res.status(404).send("Película no encontrada");
+      }
+      res.render("movieDetail", { movie });
+    } catch (error) {
+      res.status(500).send("Error al obtener la película");
+    }
   },
 
-  getByTitle(req, res) {
-    const { title } = req.query;
-    res.send(`Get movie by title: ${title}`);
-  },
-
-  getUpdateForm(req, res) {
-    const { id } = req.params;
-    const movie = this.movies.find((movie) => movie.id === id);
-    res.render("movieEdit", { movie });
+  async getUpdateForm(req, res) {
+    try {
+      const { id } = req.params;
+      const movie = await Movie.findById(id);
+      if (!movie) {
+        return res.status(404).send("Película no encontrada");
+      }
+      res.render("movieEdit", { movie });
+    } catch (error) {
+      res.status(500).send("Error al obtener la película");
+    }
   },
 
   getAddForm(req, res) {
@@ -32,64 +42,79 @@ const movieController = {
   },
 
   async createOne(req, res) {
-    const posterFilePath = req.file
-      ? `/poster/${req.file.filename}`
-      : "/poster/default.png";
-    const { title, year, duration, director, genre, rate, synopsis } = req.body;
-    const newMovie = {
-      id: crypto.randomUUID(),
-      title,
-      year,
-      duration,
-      director,
-      poster: posterFilePath,
-      genre,
-      rate,
-      synopsis,
-    };
-    this.movies = await dataSource.load();
-    this.movies.push(newMovie);
-    await dataSource.save(this.movies); // Utiliza `this.movies` aquí
-    res.redirect(`/movies`);
+    try {
+      const posterFilePath = req.file
+        ? `/poster/${req.file.filename}`
+        : "/poster/default.png";
+      const { title, year, duration, director, genre, rate, synopsis } = req.body;
+      const newMovie = new Movie({
+        title,
+        year,
+        duration,
+        director,
+        poster: posterFilePath,
+        genre,
+        rate,
+        synopsis,
+      });
+      await newMovie.save();
+      res.redirect(`/movies`);
+    } catch (error) {
+      res.status(500).send("Error al crear la película");
+    }
   },
 
   async updateOne(req, res) {
-    let poster = "";
-    if (req.file?.filename) {
-      poster = `/poster/${req.file.filename}`;
-    } else {
-      poster = req.body.currentPoster;
+    try {
+      let poster = req.file?.filename
+        ? `/poster/${req.file.filename}`
+        : req.body.currentPoster;
+      const { id } = req.params;
+      const { title, year, duration, director, genre, rate, synopsis } = req.body;
+
+      const updatedMovie = await Movie.findByIdAndUpdate(id, {
+        title,
+        year,
+        duration,
+        director,
+        poster,
+        genre,
+        rate,
+        synopsis,
+      }, { new: true });
+
+      if (!updatedMovie) {
+        return res.status(404).send("Película no encontrada");
+      }
+
+      res.redirect(`/movies/${id}`);
+    } catch (error) {
+      res.status(500).send("Error al actualizar la película");
     }
-    const { id } = req.params;
-    const { title, year, duration, director, genre, rate, synopsis } = req.body;
-    const updatedMovies = this.movies.map((movie) =>
-      movie.id === id
-        ? {
-            id,
-            title,
-            year,
-            duration,
-            director,
-            poster,
-            genre,
-            rate,
-            synopsis,
-          }
-        : movie
-    );
-    await dataSource.save(updatedMovies);
-    res.redirect(`/movies/${id}`);
   },
 
   async deleteOne(req, res) {
-    const { id } = req.params;
-    const { poster } = this.movies.find((movie) => movie.id === id);
+    try {
+      const { id } = req.params;
+      const movie = await Movie.findByIdAndDelete(id);
+      if (movie) {
+        await dataSource.removeFile(movie.poster);  // Verifica que dataSource esté importado
+      }
+      res.redirect("/movies");
+    } catch (error) {
+      res.status(500).send("Error al eliminar la película");
+    }
+  },
 
-    const filteredMovies = this.movies.filter((movie) => movie.id !== id);
-    await dataSource.save(filteredMovies);
-    await dataSource.removeFile(poster);
-    res.redirect("/movies");
+  async getByTitle(req, res) {  // Añadido aquí
+    try {
+      const { title } = req.query;
+      const movies = await Movie.find({ title: new RegExp(title, "i") });
+      res.render("movies", { movies });
+    } catch (error) {
+      res.status(500).send("Error al buscar las películas");
+    }
   },
 };
 
-export default movieController; // Exportación por defecto para ES Modules
+export default movieController;
